@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////
 // Lithium Ion Battery Capacity Tester
-// Tests up to four 18650 Li-Ion 3,6V batterys
-// Oct 21, 2015  - B. Hobbs
+// Tests up to four 18650 Li-Ion 3,6V batteries
+// Oct 21, 2015  - Patrick Wels
 ///////////////////////////////////////////////////////////////
 
 #include <PCD8544.h>        // library of functions for Nokia LCD (http://code.google.com/p/pcd8544/)
@@ -18,13 +18,14 @@
 #define LCD_HEIGHT          48
 #define BAT_WIDTH           16     // Width of battery icon in pixels
 #define BAT_HEIGHT           1     // Height of battery Icon (1 line = 8 pixels)
+
 #define BATTERY_ICON_HORIZ  33     // Horizontal position of battery icon (in pixels)
 #define MAH_HORIZ_POSITION  33     // Horizontal position of mAh display
 #define T_HORIZ_POSITION    66     // Horizontal position of mAh display
 
-#define MAX_BATTERIES	     1          //count of batteries to test
+#define MAX_BATTERIES	     4          //count of batteries to test
 #define MIN_VOLTAGE       2800
-#define REFERENCE_VOLTAGE 4750
+#define REFERENCE_VOLTAGE 5010
 
 struct batteryStruct
 {
@@ -38,7 +39,7 @@ struct batteryStruct
 }battery[MAX_BATTERIES];
 
 
-static PCD8544 lcd;
+static PCD8544 lcd(6, 5, 4, 3, 2);
 
 // Bitmaps for battery icons, Full, Empty, and Battery with an X (no battery)
 static const byte batteryEmptyIcon[] ={ 0x1c, 0x14, 0x77,0x41,0x41,
@@ -115,7 +116,6 @@ void loop() {
     ClearDisplayLine(line);
     lcd.setCursor(0, line);
     
-    
     if (battVoltage < 100)
     {
       battery[batteryNum].done = false;
@@ -176,49 +176,8 @@ void loop() {
   delay(1000);
 }
 
-//////////////////////////////////////////////////////////////////////////////////
-// printRightJustifiedUint() prints unsigned integer, right justified
-//            on the LCD with the specified number of digits (up to 5)
-//            supressing leading zeros. Prints asterisks if the number is too
-//            big to be displayed.
-//////////////////////////////////////////////////////////////////////////////////
-void printRightJustifiedUint(unsigned int n, unsigned short numDigits)
-{
-  
-  const unsigned int powersOfTen[]={1,10,100,1000,10000};
-  boolean overflow = false, supressZero = true;
-  unsigned int digit, d;
-  
-  for (d = numDigits ; d > 0 ; d--)
-  {
-     if (overflow || numDigits > 5)
-     {
-       lcd.print("*");
-     }
-     else
-     {
-       // pow() function doesn't work as expected - use array powersOfTen[]
-       digit = n / powersOfTen[d-1];
-       n = n % (powersOfTen[d-1]);
-       if (digit == 0 && supressZero && d > 1)
-          lcd.print(" ");
-       else if (digit <= 9)
-       {
-          lcd.print(digit);
-          supressZero = false;
-       }
-       else
-       {
-         overflow = true;
-         lcd.print("*");
-       }
-     }
-  }          
-}
 
-//////////////////////////////////////////////////////////////////////////////////
-// ClearDisplayLine()  utility function to clear one full line of the display
-//////////////////////////////////////////////////////////////////////////////////
+// clear spezified line
 void ClearDisplayLine(int line) 
 {
   unsigned int i;
@@ -227,17 +186,15 @@ void ClearDisplayLine(int line)
   lcd.home();
 }
 
-//get Volts in mV
+// get battery volts in mV
 int getVolt(unsigned int numBattery)
 {
 	return (map(analogRead(battery[numBattery].batteryVoltagePin),0,1023,0,REFERENCE_VOLTAGE));
 }
 
-//get Volts in mV
+// get load volts in mV
 int getLoadVolt(unsigned int numBattery)
 {
 	return (map(analogRead(battery[numBattery].batteryAmpPin),0,1023,0,REFERENCE_VOLTAGE));
 }
-
-
 
