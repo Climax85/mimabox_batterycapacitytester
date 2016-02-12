@@ -1,12 +1,12 @@
 ////////////////////////////////////////////////////////////////
 // Lithium Ion Battery Capacity Tester
-// Tests up to 8 18650 Li-Ion 3,6V batteries
-// Oct 21, 2015  - Patrick Wels
+// Tests up to 8 18650 Li-Ion batteries
+// Feb 11, 2016  - Patrick Wels
 ///////////////////////////////////////////////////////////////
 
 #include <PCD8544.h>        // library of functions for Nokia LCD (http://code.google.com/p/pcd8544/)
-#include <EEPROMex.h>
 #include <EEPROMVar.h>
+#include <avr/eeprom.h>
 
 #define LCD_TEXT_WIDTH      14   // Width of text line for Nokia LCD
 #define LCD_LINE1            0
@@ -25,7 +25,7 @@
 #define MAH_HORIZ_POSITION  33     // Horizontal position of mAh display
 #define T_HORIZ_POSITION    66     // Horizontal position of mAh display
 
-#define MAX_BATTERIES	     4     //count of batteries to test
+#define MAX_BATTERIES	     8     //count of batteries to test
 #define MIN_VOLTAGE       2800
 #define RESISTOR_VALUE     3.9
 
@@ -49,15 +49,9 @@ struct batteryStruct
 
 static PCD8544 lcd(1, 0, 2, 3, 4);
 
-// Bitmaps for battery icons, Full, Empty, and Battery with an X (no battery)
-static const byte batteryEmptyIcon[] ={ 0x1c, 0x14, 0x77,0x41,0x41,
-           0x41,0x41,0x41,0x41,0x41,0x41,0x41,0x41,0x41,0x41,0x7f};
-static const byte batteryFullIcon[] = { 0x1c, 0x14, 0x77,0x7f,0x7f,
-           0x7f,0x7f,0x7f,0x7f,0x7f,0x7f,0x7f,0x7f,0x7f,0x7f,0x7f};
+// Bitmaps for Battery with an X (no battery)
 static const byte noBatteryIcon [] = { 0x1C, 0x14, 0x77, 0x41, 0x41,
            0x41,0x63,0x77,0x5D,0x5D,0x77,0x63,0x41,0x41,0x41,0x7f};
-           
-static const byte progressIndicator[] = "-\0|/";
 
 //Prototypes for utility functions
 void printRightJustifiedUint(unsigned int n, unsigned short numDigits);
@@ -76,7 +70,6 @@ void setup() {
     battery[batteryNum].batteryVoltagePin = batteryNum;
     
     pinMode(battery[batteryNum].dischargeControlPin, OUTPUT);
-    pinMode(controlButtonPin, INPUT);
     battery[batteryNum].done = false;
     battery[batteryNum].PrevTime = 0;
     battery[batteryNum].charge = 0;
@@ -86,6 +79,7 @@ void setup() {
     battery[batteryNum].calibrationVoltageAddress = 0 + ( 2 * ( batteryNum * sizeof(float) ) );
     battery[batteryNum].calibrationCurrentAddress = sizeof(float) + ( 2 * ( batteryNum * sizeof(float) ) );
   }
+  pinMode(controlButtonPin, INPUT);
    
    lcd.begin(LCD_WIDTH, LCD_HEIGHT);// set up the LCD's dimensions in pixels
    lcd.setContrast(55);
@@ -93,10 +87,10 @@ void setup() {
    lcd.setCursor(0, LCD_LINE1);
    lcd.print(" Rechargeable");
    lcd.setCursor(0, LCD_LINE3);
-   lcd.print("   Battery    "); 
-   lcd.setCursor(0, LCD_LINE5);   
-   lcd.print("    Tester    "); 
-  
+   lcd.print("   Battery    ");
+   lcd.setCursor(0, LCD_LINE5);
+   lcd.print("    Tester    ");
+   
    delay(3000);
    
 // ----------  setup mode block start  ----------------------------------------------------------------
@@ -117,10 +111,13 @@ void setup() {
          readf = getAmps(battery[batteryNum].batteryVoltagePin);
          lcd.print("put 1A to");
          lcd.setCursor(0, LCD_LINE3); lcd.print("Battery #"); lcd.print(batteryNum + 1);
-         EEPROM.updateFloat(battery[batteryNum].calibrationCurrentAddress, readf);
-           
+         //EEPROM.updateFloat(battery[batteryNum].calibrationCurrentAddress, readf);
+         eeprom_write_float((float *)battery[batteryNum].calibrationCurrentAddress, readf);
          ClearDisplayLine(LCD_LINE5);
-         lcd.print("Current: ");
+         //lcd.print("Current: ");
+         lcd.print(battery[batteryNum].calibrationCurrentAddress);
+         lcd.print(" - ");
+         lcd.print(eeprom_read_float((float *)(battery[batteryNum].calibrationCurrentAddress)), 2);
          ClearDisplayLine(LCD_LINE6);
          lcd.print(readf, 2); lcd.print(" mA");
          
@@ -136,10 +133,14 @@ void setup() {
          readf = getVolt(battery[batteryNum].batteryVoltagePin) / 4;
          lcd.print("put 4V to");
          lcd.setCursor(0, LCD_LINE3); lcd.print("Battery #"); lcd.print(batteryNum + 1);
-         EEPROM.updateFloat(battery[batteryNum].calibrationVoltageAddress, readf);
+         //EEPROM.updateFloat(battery[batteryNum].calibrationVoltageAddress, readf);
+         eeprom_write_float((float *)battery[batteryNum].calibrationVoltageAddress, readf);
          
          ClearDisplayLine(LCD_LINE5);
-         lcd.print("Voltage: ");
+         //lcd.print("Voltage: ");
+         lcd.print(battery[batteryNum].calibrationVoltageAddress);
+         lcd.print(" - ");
+         lcd.print(eeprom_read_float((float *)(battery[batteryNum].calibrationVoltageAddress)), 2);
          ClearDisplayLine(LCD_LINE6); 
          lcd.print(readf * 4, 2); lcd.print(" mV");
          
@@ -157,59 +158,71 @@ void setup() {
    lcd.setCursor(0, LCD_LINE1);
    lcd.print(" ** LI-ION ** "); 
    lcd.setCursor(0, LCD_LINE2);
-   lcd.print("Volt  mAh  min");
+   lcd.print(" Volt mAh  min");
 }
+
+
+bool page = 0;
 
 void loop() {
   unsigned int  batteryNum, line;
-  unsigned int minuten, sekunden;
   unsigned long duration, currentTime;
   float battVoltage, battCurrent;
-  char buf[6];
-  float calibrationVoltage = EEPROM.readFloat(battery[batteryNum].calibrationVoltageAddress);
-  float calibrationCurrent = EEPROM.readFloat(battery[batteryNum].calibrationCurrentAddress);
+  char buf[20];
   
-  for ( batteryNum=0 ; batteryNum < MAX_BATTERIES ; batteryNum++ )
+  // measure all battery slots
+  for ( batteryNum=0 ; batteryNum < MAX_BATTERIES; batteryNum++ )
   {
+    // set calibration Values for slot from EEPROM
+    float calibrationVoltage = eeprom_read_float((float *)(battery[batteryNum].calibrationVoltageAddress));
+    float calibrationCurrent = eeprom_read_float((float *)(battery[batteryNum].calibrationCurrentAddress));
+    
+    // read battery voltage
     battVoltage = ( getVolt(batteryNum) * 1000 ) / calibrationVoltage;
     
-    line = LCD_LINE3 + batteryNum;
+    bool show = ( !page && batteryNum < 4 ) || ( page && batteryNum >= 4 );
     
-    // no battery
-    if (battVoltage < 500)
-    {
+    // print on lcd
+    if (show) {
+      line = LCD_LINE3 + batteryNum % 4;
       ClearDisplayLine(line);
+      lcd.print(batteryNum + 1);
+      lcd.print(" ");
+    }
+    
+    if (battVoltage < 500) // no battery
+    {
       battery[batteryNum].done = false;
       digitalWrite(battery[batteryNum].dischargeControlPin, 0);
       battery[batteryNum].charge = 0;
-      battery[batteryNum].PrevTime = 0;  
+      battery[batteryNum].PrevTime = 0;
       
-      lcd.setCursor(BATTERY_ICON_HORIZ , line);
-      lcd.drawBitmap(noBatteryIcon, sizeof(noBatteryIcon), 1);
+      if (show) {
+        lcd.setCursor(BATTERY_ICON_HORIZ , line);
+        lcd.drawBitmap(noBatteryIcon, sizeof(noBatteryIcon), 1);
+      }
     }
-    else
+    else // battery inserted
     {
-      ClearDisplayLine(line);
-      lcd.print(((float)battVoltage) / 1000, 2);
-      if (battVoltage > MIN_VOLTAGE && !battery[batteryNum].done)
+      if (battVoltage > MIN_VOLTAGE && !battery[batteryNum].done) // battery not empty or done
       {
-        if (battery[batteryNum].started) {
-          battery[batteryNum].resistance = ( battery[batteryNum].resistance - battVoltage ) / RESISTOR_VALUE;   
-          ClearDisplayLine(line);
-          lcd.print("R: "); lcd.print(battery[batteryNum].resistance); lcd.print("mOhm");
-          battery[batteryNum].started = false;
-          
-          // TODO change to step counter - no delay
-          delay(3000);
+        if (show) {
+          lcd.print(battVoltage / 1000, 1);
         }
-        if (battery[batteryNum].charge == 0)
+        
+        if (battery[batteryNum].started) // measure internal battery resistance after 1 sec of load
+        {
+          battery[batteryNum].resistance = ( battery[batteryNum].resistance - battVoltage ) / RESISTOR_VALUE;
+          battery[batteryNum].started = false;
+        }
+        
+        if (!battery[batteryNum].charge) // new battery plugged in
         {
           battery[batteryNum].StartTime = millis();
           battery[batteryNum].charge = 1;
           battery[batteryNum].resistance = battVoltage;
           battery[batteryNum].started = true;
-          
-          delay(2000);
+          delay(2000); // give time to read idle battery voltage
         }
         
         digitalWrite(battery[batteryNum].dischargeControlPin, 1);
@@ -220,36 +233,30 @@ void loop() {
         battery[batteryNum].PrevTime = currentTime;
         battery[batteryNum].charge += (battCurrent * duration) / 3600;
         
-        lcd.setCursor(MAH_HORIZ_POSITION, line);
-        sprintf(buf, "%4lu", battery[batteryNum].charge / 1000);
-        lcd.print(buf);
-        
-        lcd.setCursor(T_HORIZ_POSITION, line);
-        minuten = currentTime / 60000;
-        sprintf(buf, "%3u", minuten);
-        lcd.print(buf);
+        if (show) {
+          sprintf(buf, " %4lu %3u", battery[batteryNum].charge / 1000, currentTime / 60000);
+          lcd.print(buf);
+        }
       }
-      else
+      else // discharge of battery done
       {
         battery[batteryNum].done = true;
         digitalWrite(battery[batteryNum].dischargeControlPin, 0);
         
-        sprintf(buf, "%4f", battVoltage);
-        
-        lcd.setCursor(MAH_HORIZ_POSITION, line);
-        sprintf(buf, "%4lu", battery[batteryNum].charge / 1000);
-        lcd.print(buf);
-        
-        duration = ( battery[batteryNum].PrevTime - battery[batteryNum].StartTime ) / 60000;
-        sprintf(buf, "%3u", duration);
-        lcd.print(buf);
-        
-        lcd.setCursor(T_HORIZ_POSITION, line);
-        lcd.print("RDY");
+        if (show) {
+          sprintf(buf, "%lu R:", battery[batteryNum].charge / 1000);
+          lcd.print(buf);
+          lcd.print(battery[batteryNum].resistance, 1);
+        }
       }
     }
   }
+  
   delay(1000);
+  
+  if ( digitalRead(controlButtonPin) ) { // button pushed -> switch to other page
+    page = !page;
+  }
 }
 
 
@@ -265,12 +272,12 @@ void ClearDisplayLine(int line)
 // get battery volts in mV
 float getVolt(unsigned int numBattery)
 {
-	return map( analogRead(battery[numBattery].batteryVoltagePin), 0, 1023, 0, 5000 );
+  return map( analogRead(battery[numBattery].batteryVoltagePin), 0, 1023, 0, 5000 );
 }
 
 // get battery ampere in mA
 float getAmps(unsigned int numBattery)
 {
-	return ( map( analogRead(battery[numBattery].batteryVoltagePin), 0, 1023, 0, 5000 ) / RESISTOR_VALUE );
+  return ( map( analogRead(battery[numBattery].batteryVoltagePin), 0, 1023, 0, 5000 ) / RESISTOR_VALUE );
 }
 
