@@ -25,16 +25,18 @@
 #define MAH_HORIZ_POSITION  33     // Horizontal position of mAh display
 #define T_HORIZ_POSITION    66     // Horizontal position of mAh display
 
-#define MAX_BATTERIES	     8     //count of batteries to test
+#define MAX_BATTERIES	     8     // count of batteries to test
 #define MIN_VOLTAGE       2800
 #define RESISTOR_VALUE     3.9
 
 #define controlButtonPin    13
 
+#define DISPLAY_DELAY        5     // time in sec to show values after removed cell
+
 struct batteryStruct
 {
     unsigned long  charge;         // Total microamp hours for this battery
-    boolean done;                  // set this to DONE when this cell's test is complete
+    int done;                  // set this to DONE when this cell's test is complete
     byte batteryVoltagePin;        // Analog sensor pin (0-5) for reading battery voltage
     byte batteryAmpPin;            // Analog sensor pin (0-5) to read voltage across FET
     byte dischargeControlPin;      // Output Pin that controlls the load for this battery
@@ -70,7 +72,7 @@ void setup() {
     battery[batteryNum].batteryVoltagePin = batteryNum;
     
     pinMode(battery[batteryNum].dischargeControlPin, OUTPUT);
-    battery[batteryNum].done = false;
+    battery[batteryNum].done = 0;
     battery[batteryNum].PrevTime = 0;
     battery[batteryNum].charge = 0;
     battery[batteryNum].resistance = 0;
@@ -192,19 +194,32 @@ void loop() {
     
     if (battVoltage < 500) // no battery
     {
-      battery[batteryNum].done = false;
       digitalWrite(battery[batteryNum].dischargeControlPin, 0);
-      battery[batteryNum].charge = 0;
-      battery[batteryNum].PrevTime = 0;
       
-      if (show) {
-        lcd.setCursor(BATTERY_ICON_HORIZ , line);
-        lcd.drawBitmap(noBatteryIcon, sizeof(noBatteryIcon), 1);
+      // show values for <DISPLAY_DELAY> after removing cell
+      if (battery[batteryNum].done < DISPLAY_DELAY)
+        battery[batteryNum].done++;
+        
+        if (show) {
+          sprintf(buf, "%lu R:", battery[batteryNum].charge / 1000);
+          lcd.print(buf);
+          lcd.print(battery[batteryNum].resistance, 1);
+        }
+      else {
+        // reset cell slot after <DISPLAY_DELAY>
+        battery[batteryNum].done = 0;
+        battery[batteryNum].charge = 0;
+        battery[batteryNum].PrevTime = 0;
+        
+        if (show) {
+          lcd.setCursor(BATTERY_ICON_HORIZ , line);
+          lcd.drawBitmap(noBatteryIcon, sizeof(noBatteryIcon), 1);
+        }
       }
     }
     else // battery inserted
     {
-      if (battVoltage > MIN_VOLTAGE && !battery[batteryNum].done) // battery not empty or done
+      if (battVoltage > MIN_VOLTAGE && battery[batteryNum].done == 0) // battery not empty or done
       {
         if (show) {
           lcd.print(battVoltage / 1000, 1);
@@ -240,7 +255,7 @@ void loop() {
       }
       else // discharge of battery done
       {
-        battery[batteryNum].done = true;
+        battery[batteryNum].done = 1;
         digitalWrite(battery[batteryNum].dischargeControlPin, 0);
         
         if (show) {
